@@ -1,0 +1,15 @@
+# Git
+.git
+.gitignore
+
+# Dependencies
+node_modules
+
+# Environment
+.env
+
+# Logs
+npm-debug.log*
+
+# README
+README.md
