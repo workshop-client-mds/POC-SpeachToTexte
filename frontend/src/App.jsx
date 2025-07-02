@@ -10,13 +10,14 @@ function App() {
   const [transcript, setTranscript] = useState('');
   const [ttsText, setTtsText] = useState('');
   const [contextQuestion, setContextQuestion] = useState(
-    'Quelle est la capitale de la France et du Royaume-Uni ?'
+    ''
   );
   const [status, setStatus] = useState('Prêt');
   const [nativeApiFailed, setNativeApiFailed] = useState(false);
 
   const recognition = useRef(null);
   const finalTranscriptRef = useRef('');
+  const contextQuestionRef = useRef('');
 
   // Setup SpeechRecognition on component mount if supported
   useEffect(() => {
@@ -113,7 +114,7 @@ function App() {
       const response = await fetch('http://localhost:3001/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: rawText, question: contextQuestion }),
+        body: JSON.stringify({ text: rawText, question: contextQuestionRef.current }),
       });
       if (!response.ok) throw new Error('Clean API request failed');
       const data = await response.json();
@@ -192,7 +193,10 @@ function App() {
               type="text"
               id="question"
               value={contextQuestion}
-              onChange={(e) => setContextQuestion(e.target.value)}
+              onChange={(e) => {
+                setContextQuestion(e.target.value);
+                contextQuestionRef.current = e.target.value; 
+              }}
               className="w-full p-2 bg-gray-700 border border-gray-600 rounded-md focus:ring-2 focus:ring-blue-500 focus:outline-none"
               placeholder="Entrez la question posée à l'utilisateur..."
             />
