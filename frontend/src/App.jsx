@@ -1,78 +1,143 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
+import recorderService from './services/recorderService';
+
+// Check for browser support for the Web Speech API
+const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+const isSpeechRecognitionSupported = !!SpeechRecognition;
 
 function App() {
   const [isRecording, setIsRecording] = useState(false);
   const [transcript, setTranscript] = useState('');
-  
   const [ttsText, setTtsText] = useState('');
+  const [contextQuestion, setContextQuestion] = useState(
+    'Quelle est la capitale de la France et du Royaume-Uni ?'
+  );
   const [status, setStatus] = useState('Prêt');
+  const [nativeApiFailed, setNativeApiFailed] = useState(false);
 
-  const mediaRecorder = useRef(null);
-  const audioChunks = useRef([]);
-  const ws = useRef(null);
+  const recognition = useRef(null);
+  const finalTranscriptRef = useRef('');
 
-  const setupWebSocket = () => {
-    ws.current = new WebSocket(`ws://${window.location.hostname}:3001`);
-    ws.current.onopen = () => console.log('WebSocket for STT connected');
-    ws.current.onclose = () => console.log('WebSocket for STT disconnected');
-    ws.current.onerror = (error) => console.error('WebSocket error:', error);
-    ws.current.onmessage = (event) => {
-      const data = JSON.parse(event.data);
-      // Check if the 'transcript' property exists, even if it's an empty string
-      if (data.hasOwnProperty('transcript')) {
-        setTranscript(data.transcript || '[Silence ou erreur de transcription]');
+  // Setup SpeechRecognition on component mount if supported
+  useEffect(() => {
+    if (isSpeechRecognitionSupported) {
+      setupNativeRecognition();
+    } else {
+      setStatus('Fallback WebSocket : prêt à enregistrer.');
+    }
+  }, []); // Empty dependency array ensures this runs only once
+
+  const setupNativeRecognition = () => {
+    recognition.current = new SpeechRecognition();
+    recognition.current.continuous = true;
+    recognition.current.interimResults = true;
+    recognition.current.lang = 'fr-FR';
+
+    recognition.current.onresult = (event) => {
+      let interimTranscript = '';
+      let finalTranscript = '';
+      for (let i = event.resultIndex; i < event.results.length; ++i) {
+        if (event.results[i].isFinal) {
+          finalTranscript += event.results[i][0].transcript;
+        } else {
+          interimTranscript += event.results[i][0].transcript;
+        }
+      }
+      finalTranscriptRef.current = finalTranscript;
+      setTranscript(finalTranscript + interimTranscript);
+    };
+
+    recognition.current.onerror = (event) => {
+      console.error('Speech recognition error:', event.error);
+      setStatus(`Erreur de reconnaissance: ${event.error}. Tentative de bascule vers le fallback.`);
+      setNativeApiFailed(true);
+    };
+
+    recognition.current.onend = () => {
+      setIsRecording(false);
+      const textToClean = finalTranscriptRef.current.trim();
+      if (textToClean) {
+        handleCleanRequest(textToClean);
+      } else {
         setStatus('Prêt');
-      } else if (data.error) {
-        console.error('Transcription error from backend:', data.error);
-        setTranscript(''); // Clear previous transcript on error
-        setStatus(`Erreur: ${data.error}`);
       }
     };
   };
 
-  const handleToggleRecording = async () => {
+  const handleToggleRecording = () => {
+    const shouldUseNative = isSpeechRecognitionSupported && !nativeApiFailed;
+
     if (isRecording) {
-      // Stop recording
-      mediaRecorder.current.stop();
+      // Stop recording for either method
+      if (shouldUseNative) {
+        recognition.current.stop();
+      } else {
+        recorderService.stopRecording();
+      }
       setIsRecording(false);
-      setStatus('Transcription en cours...');
+      // For WebSocket, the final transcript is handled differently
+      if (!shouldUseNative) {
+        setStatus('Transcription en cours via WebSocket...');
+      }
     } else {
-      // Start recording
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        setupWebSocket(); // Open WS connection on record start
-        mediaRecorder.current = new MediaRecorder(stream);
+      // Start recording for either method
+      setTranscript('');
+      finalTranscriptRef.current = '';
+      setIsRecording(true);
+      
+      if (shouldUseNative) {
+        setStatus('Écoute en cours (API native)...');
+        recognition.current.start();
+      } else {
+        // Use WebSocket fallback
+        if (isSpeechRecognitionSupported && nativeApiFailed) {
+          setStatus('API native échouée. Bascule vers le fallback WebSocket...');
+        } else {
+          setStatus('Écoute en cours (Fallback WebSocket)...');
+        }
 
-        mediaRecorder.current.ondataavailable = (event) => {
-          audioChunks.current.push(event.data);
+        const onTranscript = (text) => {
+          setTranscript(text);
+          handleCleanRequest(text);
         };
-
-        mediaRecorder.current.onstop = () => {
-          const audioBlob = new Blob(audioChunks.current, { type: 'audio/webm' });
-          if (ws.current && ws.current.readyState === WebSocket.OPEN) {
-            ws.current.send(audioBlob);
-          } else {
-            console.error('WebSocket not open. Cannot send audio.');
-            setStatus('Erreur de connexion WebSocket.');
-          }
-          audioChunks.current = [];
-        };
-
-        audioChunks.current = [];
-        mediaRecorder.current.start();
-        setIsRecording(true);
-        setTranscript(''); // Clear previous transcript
-        setStatus('Enregistrement...');
-      } catch (error) {
-        console.error('Error accessing microphone:', error);
-        setStatus('Erreur: accès au microphone refusé.');
+        const onError = (error) => setStatus(error);
+        recorderService.startRecording(onTranscript, onError);
       }
     }
   };
 
-    
+  const handleCleanRequest = async (rawText) => {
+    if (!rawText) return;
+    setStatus('Nettoyage de la transcription...');
+    try {
+      const response = await fetch('http://localhost:3001/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: rawText, question: contextQuestion }),
+      });
+      if (!response.ok) throw new Error('Clean API request failed');
+      const data = await response.json();
 
-    const handleTtsRequest = async () => {
+      const cleanedText = data.cleanedText || '[Nettoyage échoué]';
+
+      console.log('--- Transcription Avant/Après ---');
+      console.log('Brute:    ', rawText);
+      console.log('Nettoyée: ', cleanedText);
+      console.log('---------------------------------');
+
+      // Update the main transcript display with the cleaned text
+      setTranscript(cleanedText);
+      // Also, pre-fill the Text-to-Speech input with the cleaned text
+      setTtsText(cleanedText);
+      
+      setStatus('Prêt');
+    } catch (error) {
+      console.error('Cleaning request error:', error);
+      setStatus(`Erreur de nettoyage: ${error.message}`);
+    }
+  };
+
+  const handleTtsRequest = async () => {
     if (!ttsText.trim()) return;
     setStatus('Synthèse vocale en cours...');
     try {
@@ -111,14 +176,29 @@ function App() {
           <div className="flex justify-center">
             <button
               onClick={handleToggleRecording}
-              className={`px-8 py-4 rounded-full text-lg font-semibold transition-all duration-300 ${isRecording ? 'bg-red-600 hover:bg-red-700 animate-pulse' : 'bg-blue-600 hover:bg-blue-700'} focus:outline-none focus:ring-4 ring-opacity-50 ${isRecording ? 'ring-red-400' : 'ring-blue-400'}`}>
+              
+              className={`px-8 py-4 rounded-full text-lg font-semibold transition-all duration-300 ${isRecording ? 'bg-red-600 hover:bg-red-700 animate-pulse' : 'bg-blue-600 hover:bg-blue-700'} focus:outline-none focus:ring-4 ring-opacity-50 ${isRecording ? 'ring-red-400' : 'ring-blue-400'} disabled:bg-gray-500 disabled:cursor-not-allowed`}>
               {isRecording ? 'Stop' : 'Parler'}
             </button>
           </div>
         </div>
 
         <div className="bg-gray-800 rounded-lg p-6 shadow-lg">
-          <h2 className="text-3xl font-bold text-center mb-4">Text-to-Speech</h2>
+          <div className="mb-6">
+            <label htmlFor="question" className="block text-lg font-medium text-gray-300 mb-2">
+              Question de Contexte
+            </label>
+            <input
+              type="text"
+              id="question"
+              value={contextQuestion}
+              onChange={(e) => setContextQuestion(e.target.value)}
+              className="w-full p-2 bg-gray-700 border border-gray-600 rounded-md focus:ring-2 focus:ring-blue-500 focus:outline-none"
+              placeholder="Entrez la question posée à l'utilisateur..."
+            />
+          </div>
+
+          <h2 className="text-2xl font-bold mb-4">Actions</h2>
           <textarea 
             className="w-full bg-gray-700 text-white p-3 rounded-md mb-4 border border-gray-600 focus:ring-2 focus:ring-green-500 focus:outline-none"
             rows="3"
