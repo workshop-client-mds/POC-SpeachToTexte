@@ -5,6 +5,7 @@ import cors from 'cors';
 
 import OpenAI from 'openai';
 import { toFile } from 'openai/uploads';
+import { WebSocketServer } from 'ws';
 
 // --- OpenAI Client Setup ---
 const openai = new OpenAI({
@@ -52,6 +53,9 @@ app.post('/api/tts', async (req, res) => {
 
 // --- Chat Endpoint for Cleaning Text ---
 app.post('/api/chat', async (req, res) => {
+  console.log('--- Cleaning Request ---');
+  console.log('Texte à nettoyer (avant):', req.body.text);
+  console.log('------------------------');
   const { text, question } = req.body;
   if (!text || !question) {
     return res.status(400).json({ error: 'Text and question are required' });
@@ -86,11 +90,80 @@ Exemple :
     });
 
     const aiResponse = completion.choices[0].message.content;
-    res.json({ response: aiResponse });
+    console.log('--- Cleaning Result ---');
+    console.log('Texte nettoyé (après):', aiResponse);
+    console.log('-----------------------');
+    res.json({ cleanedText: aiResponse });
   } catch (error) {
     console.error('Error during chat completion:', error);
     res.status(500).json({ error: 'Failed to get chat response.' });
   }
+});
+
+
+// --- WebSocket Server for Real-time Transcription ---
+const wss = new WebSocketServer({ server });
+
+wss.on('connection', (ws) => {
+  console.log('Client connected via WebSocket for transcription.');
+  let audioChunks = [];
+
+  ws.on('message', async (message) => {
+    // All messages from the 'ws' library are Buffers. We must try to interpret them.
+    let command;
+    try {
+      // Attempt to parse the message as a JSON command.
+      command = JSON.parse(message.toString());
+      console.log('[Backend] Message successfully parsed as JSON command:', command);
+    } catch (e) {
+      // If parsing fails, it's not a command, so it must be audio data.
+      console.log('[Backend] Message is not a JSON command, treating as binary audio data.');
+      audioChunks.push(message);
+      return; // Stop processing this message further.
+    }
+
+    // If we're here, the message was a valid JSON command.
+    if (command && command.event === 'end') {
+      if (audioChunks.length === 0) {
+        console.log('[Backend] Received "end" command but no audio was recorded.');
+        return;
+      }
+      
+      console.log('End of audio stream received. Processing...');
+      try {
+        const audioBuffer = Buffer.concat(audioChunks);
+        const mimeType = command.mimeType || 'audio/webm';
+        const fileName = `upload.${mimeType.split('/')[1].split(';')[0]}`;
+
+        const audioFile = await toFile(audioBuffer, fileName, { type: mimeType });
+
+        const transcription = await openai.audio.transcriptions.create({
+          model: 'whisper-1',
+          file: audioFile,
+        });
+
+        console.log('--- Fallback Transcript (Raw) ---');
+        console.log('Texte brut de Whisper:', transcription.text);
+        console.log('---------------------------------');
+        ws.send(JSON.stringify({ event: 'transcript', data: transcription.text }));
+
+        audioChunks = []; // Reset for the next recording.
+      } catch (error) {
+        console.error('Error during STT processing via WebSocket:', error);
+        ws.send(JSON.stringify({ event: 'error', message: 'Failed to process audio.' }));
+      }
+    } else {
+      console.log(`[Backend] Received a command, but it's not 'end' or not actionable now:`, command);
+    }
+  });
+
+  ws.on('close', () => {
+    console.log('Client disconnected from WebSocket.');
+  });
+
+  ws.on('error', (error) => {
+    console.error('WebSocket error:', error);
+  });
 });
 
 // --- Start Server ---

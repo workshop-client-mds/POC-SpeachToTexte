@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
+import recorderService from './services/recorderService';
 
 // Check for browser support for the Web Speech API
 const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -12,25 +13,29 @@ function App() {
     'Quelle est la capitale de la France et du Royaume-Uni ?'
   );
   const [status, setStatus] = useState('Prêt');
+  const [nativeApiFailed, setNativeApiFailed] = useState(false);
 
   const recognition = useRef(null);
+  const finalTranscriptRef = useRef('');
 
-  // Setup SpeechRecognition on component mount
+  // Setup SpeechRecognition on component mount if supported
   useEffect(() => {
-    if (!isSpeechRecognitionSupported) {
-      setStatus('API de reconnaissance vocale non supportée par ce navigateur.');
-      return;
+    if (isSpeechRecognitionSupported) {
+      setupNativeRecognition();
+    } else {
+      setStatus('Fallback WebSocket : prêt à enregistrer.');
     }
+  }, []); // Empty dependency array ensures this runs only once
 
+  const setupNativeRecognition = () => {
     recognition.current = new SpeechRecognition();
-    recognition.current.continuous = true; // Keep listening even after a pause
-    recognition.current.interimResults = true; // Get results as they are being spoken
+    recognition.current.continuous = true;
+    recognition.current.interimResults = true;
     recognition.current.lang = 'fr-FR';
 
     recognition.current.onresult = (event) => {
       let interimTranscript = '';
       let finalTranscript = '';
-
       for (let i = event.resultIndex; i < event.results.length; ++i) {
         if (event.results[i].isFinal) {
           finalTranscript += event.results[i][0].transcript;
@@ -38,67 +43,97 @@ function App() {
           interimTranscript += event.results[i][0].transcript;
         }
       }
-      // Display interim results for real-time feedback
+      finalTranscriptRef.current = finalTranscript;
       setTranscript(finalTranscript + interimTranscript);
     };
 
     recognition.current.onerror = (event) => {
       console.error('Speech recognition error:', event.error);
-      setStatus(`Erreur de reconnaissance: ${event.error}`);
+      setStatus(`Erreur de reconnaissance: ${event.error}. Tentative de bascule vers le fallback.`);
+      setNativeApiFailed(true);
     };
 
     recognition.current.onend = () => {
-      if (isRecording) {
-        // If it stops unexpectedly, restart it
-        recognition.current.start();
+      setIsRecording(false);
+      const textToClean = finalTranscriptRef.current.trim();
+      if (textToClean) {
+        handleCleanRequest(textToClean);
+      } else {
+        setStatus('Prêt');
       }
     };
-
-  }, []); // Empty dependency array ensures this runs only once
+  };
 
   const handleToggleRecording = () => {
-    if (!isSpeechRecognitionSupported) return;
+    const shouldUseNative = isSpeechRecognitionSupported && !nativeApiFailed;
 
     if (isRecording) {
-      // Stop recording
-      recognition.current.stop();
+      // Stop recording for either method
+      if (shouldUseNative) {
+        recognition.current.stop();
+      } else {
+        recorderService.stopRecording();
+      }
       setIsRecording(false);
-      setStatus('Nettoyage du texte...');
-      // Send the final transcript for cleaning
-      if (transcript.trim()) {
-        handleCleanRequest(transcript);
+      // For WebSocket, the final transcript is handled differently
+      if (!shouldUseNative) {
+        setStatus('Transcription en cours via WebSocket...');
       }
     } else {
-      // Start recording
-      setTranscript(''); // Clear previous transcript
-      recognition.current.start();
+      // Start recording for either method
+      setTranscript('');
+      finalTranscriptRef.current = '';
       setIsRecording(true);
-      setStatus('Écoute en cours...');
+      
+      if (shouldUseNative) {
+        setStatus('Écoute en cours (API native)...');
+        recognition.current.start();
+      } else {
+        // Use WebSocket fallback
+        if (isSpeechRecognitionSupported && nativeApiFailed) {
+          setStatus('API native échouée. Bascule vers le fallback WebSocket...');
+        } else {
+          setStatus('Écoute en cours (Fallback WebSocket)...');
+        }
+
+        const onTranscript = (text) => {
+          setTranscript(text);
+          handleCleanRequest(text);
+        };
+        const onError = (error) => setStatus(error);
+        recorderService.startRecording(onTranscript, onError);
+      }
     }
   };
 
   const handleCleanRequest = async (rawText) => {
-    setStatus('Nettoyage du texte...');
+    if (!rawText) return;
+    setStatus('Nettoyage de la transcription...');
     try {
-      const response = await fetch(`http://${window.location.hostname}:3001/api/chat`, {
+      const response = await fetch('http://localhost:3001/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text: rawText, question: contextQuestion }),
       });
       if (!response.ok) throw new Error('Clean API request failed');
-      const { response: cleanedText } = await response.json();
+      const data = await response.json();
+
+      const cleanedText = data.cleanedText || '[Nettoyage échoué]';
 
       console.log('--- Transcription Avant/Après ---');
       console.log('Brute:    ', rawText);
       console.log('Nettoyée: ', cleanedText);
       console.log('---------------------------------');
 
+      // Update the main transcript display with the cleaned text
       setTranscript(cleanedText);
+      // Also, pre-fill the Text-to-Speech input with the cleaned text
+      setTtsText(cleanedText);
+      
       setStatus('Prêt');
     } catch (error) {
       console.error('Cleaning request error:', error);
-      setTranscript(rawText); // Show raw transcript on cleaning error
-      setStatus('Erreur lors du nettoyage.');
+      setStatus(`Erreur de nettoyage: ${error.message}`);
     }
   };
 
@@ -141,7 +176,7 @@ function App() {
           <div className="flex justify-center">
             <button
               onClick={handleToggleRecording}
-              disabled={!isSpeechRecognitionSupported}
+              
               className={`px-8 py-4 rounded-full text-lg font-semibold transition-all duration-300 ${isRecording ? 'bg-red-600 hover:bg-red-700 animate-pulse' : 'bg-blue-600 hover:bg-blue-700'} focus:outline-none focus:ring-4 ring-opacity-50 ${isRecording ? 'ring-red-400' : 'ring-blue-400'} disabled:bg-gray-500 disabled:cursor-not-allowed`}>
               {isRecording ? 'Stop' : 'Parler'}
             </button>
