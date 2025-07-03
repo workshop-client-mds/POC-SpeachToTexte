@@ -37,8 +37,8 @@ app.post('/api/tts', async (req, res) => {
 
   try {
     const mp3 = await openai.audio.speech.create({
-      model: 'tts-1',
-      voice: 'alloy', // As specified in prd.md
+      model: 'gpt-4o-mini-tts',
+      voice: 'alloy',
       input: text,
     });
 
@@ -53,45 +53,43 @@ app.post('/api/tts', async (req, res) => {
 
 // --- Chat Endpoint for Cleaning Text ---
 app.post('/api/chat', async (req, res) => {
+  const { text, question } = req.body; // question is optional
+
   console.log('--- Cleaning Request ---');
-  console.log('Texte à nettoyer (avant):', req.body.text);
+  console.log('Texte à nettoyer:', text);
+  if (question) {
+    console.log('Question de contexte:', question);
+  }
   console.log('------------------------');
-  const { text, question } = req.body;
-  if (!text || !question) {
-    return res.status(400).json({ error: 'Text and question are required' });
+
+  if (!text) {
+    return res.status(400).json({ error: 'Text is required' });
   }
 
   try {
+    // Construct the user message based on whether a question is provided
+    const userContent = question
+      ? `Question: "${question}"\n\nTranscription brute de la réponse: "${text}"`
+      : `Transcription brute: "${text}"`;
+
     const completion = await openai.chat.completions.create({
-      model: 'gpt-4.1-nano',
-      temperature: 0.4, // Slightly lower temperature for more deterministic corrections
+      model: 'gpt-4.1-nano', // Using a newer, more capable model
+      temperature: 0.2, // Lower temperature for more deterministic corrections
       messages: [
         {
           role: 'system',
-          content: `Tu es un assistant de correction linguistique de très haut niveau. Ton rôle est d'analyser la réponse d'un utilisateur à une question donnée. La transcription de la réponse peut contenir des erreurs (mots mal reconnus) à cause d'une mauvaise prononciation.
-
-Ta mission est la suivante :
-1.  **Utilise le contexte** : Sers-toi de la **question** fournie comme indice principal pour déduire le sens réel de la réponse et corriger les erreurs de transcription.
-2.  **Corrige intelligemment** : Si un mot dans la transcription semble illogique par rapport à la question, trouve le mot le plus probable que l'utilisateur voulait dire.
-3.  **Clarifie et nettoie** : Une fois la correction sémantique effectuée, nettoie la phrase des hésitations, répétitions et tics de langage.
-4.  **Sois fidèle** : Ne change pas le sens de la réponse de l'utilisateur. Ton but est de restituer son intention le plus fidèlement possible.
-5.  **Gère l'incertitude** : Si la transcription est trop ambiguë pour être corrigée avec certitude ou si aucune réponse n'est détectable, retourne '[Pas de réponse détectée]'.
-
-Exemple :
--   **Question fournie** : "Quelle est la capitale du Royaume-Uni ?"
--   **Transcription brute** : "euh... je crois que c'est... langue... non, lande... oui, lande"
--   **Sortie attendue** : "Je crois que c'est Londres."`,
+          content: `Tu es un assistant de correction linguistique de très haut niveau. Ton rôle est d'analyser une transcription audio qui peut contenir des erreurs, des hésitations ou des tics de langage.\n\nTa mission est la suivante :\n1.  **Corrige et nettoie** : Corrige les erreurs de transcription et nettoie la phrase des hésitations, répétitions et tics de langage pour la rendre claire et naturelle.\n2.  **Utilise le contexte (si fourni)** : Si une **question** est fournie, utilise-la comme indice principal pour déduire le sens réel de la réponse et effectuer des corrections plus précises.\n3.  **Sois fidèle** : Ne change pas le sens de la réponse de l'utilisateur. Ton but est de restituer son intention le plus fidèlement possible.\n4.  **Gère l'incertitude** : Si la transcription est trop ambiguë pour être corrigée avec certitude, retourne '[Pas de réponse détectée]'.\n5.  **Format de sortie** : Ne retourne QUE le texte corrigé, sans aucune phrase d'introduction comme "Voici le texte corrigé :".\n\nExemple avec question :\n-   **Question fournie** : "Quelle est la capitale du Royaume-Uni ?"\n-   **Transcription brute** : "euh... je crois que c'est... langue... non, lande... oui, lande"\n-   **Sortie attendue** : "Je crois que c'est Londres."\n\nExemple sans question :\n-   **Transcription brute** : "euh... j'aimerais... j'aimerais réserver une table pour... pour deux personnes ce soir."\n-   **Sortie attendue** : "J'aimerais réserver une table pour deux personnes ce soir."`,
         },
         {
           role: 'user',
-          content: `Question: "${question}"\n\nTranscription brute de la réponse: "${text}"`,
+          content: userContent,
         },
       ],
     });
 
     const aiResponse = completion.choices[0].message.content;
     console.log('--- Cleaning Result ---');
-    console.log('Texte nettoyé (après):', aiResponse);
+    console.log('Texte nettoyé:', aiResponse);
     console.log('-----------------------');
     res.json({ cleanedText: aiResponse });
   } catch (error) {
@@ -99,7 +97,6 @@ Exemple :
     res.status(500).json({ error: 'Failed to get chat response.' });
   }
 });
-
 
 // --- WebSocket Server for Real-time Transcription ---
 const wss = new WebSocketServer({ server });
@@ -114,10 +111,15 @@ wss.on('connection', (ws) => {
     try {
       // Attempt to parse the message as a JSON command.
       command = JSON.parse(message.toString());
-      console.log('[Backend] Message successfully parsed as JSON command:', command);
+      console.log(
+        '[Backend] Message successfully parsed as JSON command:',
+        command,
+      );
     } catch (e) {
       // If parsing fails, it's not a command, so it must be audio data.
-      console.log('[Backend] Message is not a JSON command, treating as binary audio data.');
+      console.log(
+        '[Backend] Message is not a JSON command, treating as binary audio data.',
+      );
       audioChunks.push(message);
       return; // Stop processing this message further.
     }
@@ -125,35 +127,52 @@ wss.on('connection', (ws) => {
     // If we're here, the message was a valid JSON command.
     if (command && command.event === 'end') {
       if (audioChunks.length === 0) {
-        console.log('[Backend] Received "end" command but no audio was recorded.');
+        console.log(
+          '[Backend] Received "end" command but no audio was recorded.',
+        );
         return;
       }
-      
+
       console.log('End of audio stream received. Processing...');
       try {
         const audioBuffer = Buffer.concat(audioChunks);
         const mimeType = command.mimeType || 'audio/webm';
         const fileName = `upload.${mimeType.split('/')[1].split(';')[0]}`;
 
-        const audioFile = await toFile(audioBuffer, fileName, { type: mimeType });
+        const audioFile = await toFile(audioBuffer, fileName, {
+          type: mimeType,
+        });
 
         const transcription = await openai.audio.transcriptions.create({
           model: 'whisper-1',
           file: audioFile,
+          language: 'fr',
+          prompt:
+            'Cette transcription est en français et concerne une conversation générale.',
         });
 
         console.log('--- Fallback Transcript (Raw) ---');
         console.log('Texte brut de Whisper:', transcription.text);
         console.log('---------------------------------');
-        ws.send(JSON.stringify({ event: 'transcript', data: transcription.text }));
+        ws.send(
+          JSON.stringify({ event: 'transcript', data: transcription.text }),
+        );
 
         audioChunks = []; // Reset for the next recording.
       } catch (error) {
         console.error('Error during STT processing via WebSocket:', error);
-        ws.send(JSON.stringify({ event: 'error', message: 'Failed to process audio.' }));
+        ws.send(
+          JSON.stringify({
+            event: 'error',
+            message: 'Failed to process audio.',
+          }),
+        );
       }
     } else {
-      console.log(`[Backend] Received a command, but it's not 'end' or not actionable now:`, command);
+      console.log(
+        `[Backend] Received a command, but it's not 'end' or not actionable now:`,
+        command,
+      );
     }
   });
 
