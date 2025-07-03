@@ -4,16 +4,14 @@
     "password": "postgres",
     "database": "poc_voice_db",
     "host": "db",
-    "dialect": "postgres",
-    "schema": "app"
+    "dialect": "postgres"
   },
   "test": {
     "username": "postgres",
     "password": "postgres",
     "database": "poc_voice_db_test",
     "host": "db",
-    "dialect": "postgres",
-    "schema": "app"
+    "dialect": "postgres"
   },
   "production": {
     "use_env_variable": "DATABASE_URL",

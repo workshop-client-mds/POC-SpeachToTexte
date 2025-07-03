@@ -12,6 +12,9 @@ COPY package*.json ./
 # Install all dependencies, including dev dependencies.
 RUN npm install
 
+# Install sequelize-cli globally to have it available in the container
+RUN npm install -g sequelize-cli
+
 # Copy local code to the container image.
 COPY . .
 

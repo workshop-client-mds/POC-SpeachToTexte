@@ -9,7 +9,7 @@
     "dev": "nodemon src/index.js",
     "format": "prettier --write \"src/**/*.js\"",
     "check-format": "prettier --check \"src/**/*.js\"",
-    "migrate": "npx sequelize-cli db:migrate"
+    "db:migrate": "npx sequelize-cli db:migrate"
   },
   "dependencies": {
     "cors": "^2.8.5",
