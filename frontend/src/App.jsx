@@ -165,7 +165,7 @@ function App() {
   };
 
   return (
-    <div className="bg-gray-900 text-white min-h-screen flex flex-col items-center justify-center font-sans p-4">
+    <div className="text-white min-h-screen flex flex-col items-center justify-center font-sans p-4">
       <div className="w-full max-w-2xl space-y-8">
         
         <div className="bg-gray-800 rounded-lg p-6 shadow-lg">
