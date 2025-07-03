@@ -2,18 +2,21 @@ import { useState, useRef, useEffect } from 'react';
 import recorderService from './services/recorderService';
 
 // Check for browser support for the Web Speech API
-const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+const SpeechRecognition =
+  window.SpeechRecognition || window.webkitSpeechRecognition;
 const isSpeechRecognitionSupported = !!SpeechRecognition;
 
 function App() {
   const [isRecording, setIsRecording] = useState(false);
   const [transcript, setTranscript] = useState('');
   const [ttsText, setTtsText] = useState('');
-  const [contextQuestion, setContextQuestion] = useState(
-    ''
-  );
+  const [contextQuestion, setContextQuestion] = useState('');
   const [status, setStatus] = useState('Prêt');
   const [nativeApiFailed, setNativeApiFailed] = useState(false);
+  const [language, setLanguage] = useState('fr-FR');
+  const [isFallbackMode, setIsFallbackMode] = useState(false);
+  const [showHistory, setShowHistory] = useState(false);
+  const [history, setHistory] = useState([]);
 
   const recognition = useRef(null);
   const finalTranscriptRef = useRef('');
@@ -24,15 +27,25 @@ function App() {
     if (isSpeechRecognitionSupported) {
       setupNativeRecognition();
     } else {
-      setStatus('Fallback WebSocket : prêt à enregistrer.');
+      setStatus('Prêt');
+      setIsFallbackMode(true);
     }
-  }, []); // Empty dependency array ensures this runs only once
+  }, []);
+
+  useEffect(() => {
+    if (isSpeechRecognitionSupported) {
+      if (recognition.current && isRecording) {
+        recognition.current.stop();
+      }
+      setupNativeRecognition();
+    }
+  }, [language]); // Re-run when language changes
 
   const setupNativeRecognition = () => {
     recognition.current = new SpeechRecognition();
     recognition.current.continuous = true;
     recognition.current.interimResults = true;
-    recognition.current.lang = 'fr-FR';
+    recognition.current.lang = language;
 
     recognition.current.onresult = (event) => {
       let interimTranscript = '';
@@ -50,8 +63,11 @@ function App() {
 
     recognition.current.onerror = (event) => {
       console.error('Speech recognition error:', event.error);
-      setStatus(`Erreur de reconnaissance: ${event.error}. Tentative de bascule vers le fallback.`);
+      setStatus(
+        `Erreur de reconnaissance: ${event.error}. Tentative de bascule vers le fallback.`,
+      );
       setNativeApiFailed(true);
+      setIsFallbackMode(true);
     };
 
     recognition.current.onend = () => {
@@ -85,14 +101,16 @@ function App() {
       setTranscript('');
       finalTranscriptRef.current = '';
       setIsRecording(true);
-      
+
       if (shouldUseNative) {
         setStatus('Écoute en cours (API native)...');
         recognition.current.start();
       } else {
         // Use WebSocket fallback
         if (isSpeechRecognitionSupported && nativeApiFailed) {
-          setStatus('API native échouée. Bascule vers le fallback WebSocket...');
+          setStatus(
+            'API native échouée. Bascule vers le fallback WebSocket...',
+          );
         } else {
           setStatus('Écoute en cours (Fallback WebSocket)...');
         }
@@ -102,7 +120,7 @@ function App() {
           handleCleanRequest(text);
         };
         const onError = (error) => setStatus(error);
-        recorderService.startRecording(onTranscript, onError);
+        recorderService.startRecording(onTranscript, onError, language);
       }
     }
   };
@@ -114,7 +132,11 @@ function App() {
       const response = await fetch('http://localhost:3001/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: rawText, question: contextQuestionRef.current }),
+        body: JSON.stringify({
+          text: rawText,
+          question: contextQuestionRef.current,
+          lang: language,
+        }),
       });
       if (!response.ok) throw new Error('Clean API request failed');
       const data = await response.json();
@@ -130,7 +152,7 @@ function App() {
       setTranscript(cleanedText);
       // Also, pre-fill the Text-to-Speech input with the cleaned text
       setTtsText(cleanedText);
-      
+
       setStatus('Prêt');
     } catch (error) {
       console.error('Cleaning request error:', error);
@@ -142,14 +164,19 @@ function App() {
     if (!ttsText.trim()) return;
     setStatus('Synthèse vocale en cours...');
     try {
-      const response = await fetch(`http://${window.location.hostname}:3001/api/tts`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: ttsText }),
-      });
+      const response = await fetch(
+        `http://${window.location.hostname}:3001/api/tts`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text: ttsText, lang: language }),
+        },
+      );
 
       if (!response.ok) {
-        throw new Error(`TTS API request failed with status ${response.status}`);
+        throw new Error(
+          `TTS API request failed with status ${response.status}`,
+        );
       }
 
       const audioBlob = await response.blob();
@@ -157,28 +184,84 @@ function App() {
       const audio = new Audio(audioUrl);
       audio.play();
       audio.onended = () => setStatus('Prêt');
-
     } catch (error) {
       console.error('TTS request error:', error);
       setStatus('Erreur de synthèse vocale.');
     }
   };
 
+  const fetchHistory = async () => {
+    try {
+      const response = await fetch('http://localhost:3001/api/transcripts');
+      const data = await response.json();
+      setHistory(data);
+    } catch (error) {
+      console.error('Failed to fetch history:', error);
+    }
+  };
+
+  const toggleHistory = () => {
+    if (!showHistory) {
+      fetchHistory();
+    }
+    setShowHistory(!showHistory);
+  };
+
   return (
-    <div className="bg-gray-900 text-white min-h-screen flex flex-col items-center justify-center font-sans p-4">
+    <div className="text-white min-h-screen flex flex-col items-center justify-center font-sans p-4">
       <div className="w-full max-w-2xl space-y-8">
-        
+        <div className="history-container absolute bottom-4 right-4">
+          {showHistory && (
+            <div className="history-panel bg-gray-800 rounded-lg p-4 shadow-lg w-96 max-h-96 overflow-y-auto mb-2">
+              <h2 className="text-xl font-bold mb-4">Transcription History</h2>
+              <div className="history-list space-y-4">
+                {history.length > 0 ? (
+                  history.map((item) => (
+                    <div key={item.id} className="history-item border-b border-gray-700 pb-2">
+                      <p className="text-sm text-gray-400">{new Date(item.createdAt).toLocaleString()} | {item.language}</p>
+                      <p><strong>Original:</strong> {item.rawText}</p>
+                      <p><strong>Cleaned:</strong> {item.cleanedText}</p>
+                    </div>
+                  ))
+                ) : (
+                  <p>No history found.</p>
+                )}
+              </div>
+            </div>
+          )}
+          <button onClick={toggleHistory} className="history-button bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-full shadow-lg">
+            {showHistory ? 'Close History' : 'View History'}
+          </button>
+        </div>
         <div className="bg-gray-800 rounded-lg p-6 shadow-lg">
-          <h1 className="text-3xl font-bold text-center mb-2">Speech-to-Text</h1>
-          <p className="text-center text-gray-400 mb-4">Statut: {status}</p>
+          <div className="flex justify-between items-center mb-4">
+            <h1 className="text-3xl font-bold">Speech-to-Text</h1>
+            <select
+              value={language}
+              onChange={(e) => setLanguage(e.target.value)}
+              className="bg-gray-700 border border-gray-600 rounded-md p-2 focus:ring-2 focus:ring-blue-500 focus:outline-none"
+            >
+              <option value="fr-FR">Français</option>
+              <option value="en-US">English</option>
+            </select>
+          </div>
+          <p className="text-center text-gray-400 mb-4">
+            Statut: {status}{' '}
+            {isFallbackMode && (
+              <span className="text-yellow-400 text-xs">(Mode Fallback)</span>
+            )}
+          </p>
           <div className="min-h-[120px] bg-gray-900 rounded-md p-4 mb-6 border border-gray-700">
-            <p className="text-gray-300">{transcript || 'Cliquez sur "Parler" pour commencer la transcription.'}</p>
+            <p className="text-gray-300">
+              {transcript ||
+                'Cliquez sur "Parler" pour commencer la transcription.'}
+            </p>
           </div>
           <div className="flex justify-center">
             <button
               onClick={handleToggleRecording}
-              
-              className={`px-8 py-4 rounded-full text-lg font-semibold transition-all duration-300 ${isRecording ? 'bg-red-600 hover:bg-red-700 animate-pulse' : 'bg-blue-600 hover:bg-blue-700'} focus:outline-none focus:ring-4 ring-opacity-50 ${isRecording ? 'ring-red-400' : 'ring-blue-400'} disabled:bg-gray-500 disabled:cursor-not-allowed`}>
+              className={`px-8 py-4 rounded-full text-lg font-semibold transition-all duration-300 ${isRecording ? 'bg-red-600 hover:bg-red-700 animate-pulse' : 'bg-blue-600 hover:bg-blue-700'} focus:outline-none focus:ring-4 ring-opacity-50 ${isRecording ? 'ring-red-400' : 'ring-blue-400'} disabled:bg-gray-500 disabled:cursor-not-allowed`}
+            >
               {isRecording ? 'Stop' : 'Parler'}
             </button>
           </div>
@@ -186,7 +269,10 @@ function App() {
 
         <div className="bg-gray-800 rounded-lg p-6 shadow-lg">
           <div className="mb-6">
-            <label htmlFor="question" className="block text-lg font-medium text-gray-300 mb-2">
+            <label
+              htmlFor="question"
+              className="block text-lg font-medium text-gray-300 mb-2"
+            >
               Question de Contexte
             </label>
             <input
@@ -195,7 +281,7 @@ function App() {
               value={contextQuestion}
               onChange={(e) => {
                 setContextQuestion(e.target.value);
-                contextQuestionRef.current = e.target.value; 
+                contextQuestionRef.current = e.target.value;
               }}
               className="w-full p-2 bg-gray-700 border border-gray-600 rounded-md focus:ring-2 focus:ring-blue-500 focus:outline-none"
               placeholder="Entrez la question posée à l'utilisateur..."
@@ -203,7 +289,7 @@ function App() {
           </div>
 
           <h2 className="text-2xl font-bold mb-4">Actions</h2>
-          <textarea 
+          <textarea
             className="w-full bg-gray-700 text-white p-3 rounded-md mb-4 border border-gray-600 focus:ring-2 focus:ring-green-500 focus:outline-none"
             rows="3"
             placeholder="Entrez du texte à synthétiser..."
@@ -211,7 +297,7 @@ function App() {
             onChange={(e) => setTtsText(e.target.value)}
           ></textarea>
           <div className="flex justify-center">
-            <button 
+            <button
               onClick={handleTtsRequest}
               className="bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-6 rounded-lg transition-colors disabled:bg-gray-500"
               disabled={status !== 'Prêt'}
@@ -220,7 +306,6 @@ function App() {
             </button>
           </div>
         </div>
-
       </div>
     </div>
   );

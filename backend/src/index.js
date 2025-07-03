@@ -1,11 +1,15 @@
-import 'dotenv/config';
-import express from 'express';
-import http from 'http';
-import cors from 'cors';
-
-import OpenAI from 'openai';
-import { toFile } from 'openai/uploads';
-import { WebSocketServer } from 'ws';
+const dotenv = require('dotenv');
+dotenv.config();
+const express = require('express');
+const http = require('http');
+const { WebSocketServer } = require('ws');
+const cors = require('cors');
+const multer = require('multer');
+const OpenAI = require('openai');
+const { toFile } = require('openai/uploads');
+const { Readable } = require('stream');
+const transcriptRoutes = require('./routes/transcript.routes');
+const transcriptService = require('./services/transcript.service');
 
 // --- OpenAI Client Setup ---
 const openai = new OpenAI({
@@ -18,8 +22,25 @@ const server = http.createServer(app);
 
 const PORT = process.env.PORT || 3001;
 
-app.use(cors());
+const corsOptions = {
+  origin: (origin, callback) => {
+    const allowedOrigins = ['http://localhost:3000', 'https://localhost:3000'];
+    // In a production environment, you should use a proper whitelist of allowed domains.
+    // For this development setup, we'll allow requests from our frontend's origin.
+    if (allowedOrigins.includes(origin) || !origin) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+  credentials: true, // This allows the server to accept cookies from the client.
+};
+
+app.use(cors(corsOptions));
 app.use(express.json());
+
+// --- Transcript History Routes ---
+app.use('/api/transcripts', transcriptRoutes);
 
 // --- Health Check Endpoint ---
 app.get('/', (req, res) => {
@@ -28,7 +49,8 @@ app.get('/', (req, res) => {
 
 // --- TTS REST Endpoint ---
 app.post('/api/tts', async (req, res) => {
-  const { text } = req.body;
+  const { text, lang = 'fr-FR' } = req.body; // Default to French
+  const voice = lang.startsWith('en') ? 'nova' : 'alloy'; // English voice vs. French voice
   if (!text) {
     return res.status(400).json({ error: 'Text is required' });
   }
@@ -52,8 +74,16 @@ app.post('/api/tts', async (req, res) => {
 });
 
 // --- Chat Endpoint for Cleaning Text ---
+const getSystemPrompt = (lang) => {
+  if (lang.startsWith('en')) {
+    return `You are a world-class language correction assistant. Your role is to analyze an audio transcription that may contain errors, hesitations, or filler words.\n\nYour mission is as follows:\n1. **Correct and clean**: Correct transcription errors and clean the sentence of hesitations, repetitions, and filler words to make it clear and natural.\n2. **Use context (if provided)**: If a **question** is provided, use it as the main clue to infer the real meaning of the answer and make more accurate corrections.\n3. **Be faithful**: Do not change the meaning of the user's response. Your goal is to restore their intention as faithfully as possible.\n4. **Handle uncertainty**: If the transcription is too ambiguous to be corrected with certainty, return '[No answer detected]'.\n5. **Output format**: Return ONLY the corrected text, without any introductory phrases like "Here is the corrected text:".`;
+  }
+  // Default to French
+  return `Tu es un assistant de correction linguistique de très haut niveau. Ton rôle est d'analyser une transcription audio qui peut contenir des erreurs, des hésitations ou des tics de langage.\n\nTa mission est la suivante :\n1.  **Corrige et nettoie** : Corrige les erreurs de transcription et nettoie la phrase des hésitations, répétitions et tics de langage pour la rendre claire et naturelle.\n2.  **Utilise le contexte (si fourni)** : Si une **question** est fournie, utilise-la comme indice principal pour déduire le sens réel de la réponse et effectuer des corrections plus précises.\n3.  **Sois fidèle** : Ne change pas le sens de la réponse de l'utilisateur. Ton but est de restituer son intention le plus fidèlement possible.\n4.  **Gère l'incertitude** : Si la transcription est trop ambiguë pour être corrigée avec certitude, retourne '[Pas de réponse détectée]'.\n5.  **Format de sortie** : Ne retourne QUE le texte corrigé, sans aucune phrase d'introduction comme "Voici le texte corrigé :".`;
+};
+
 app.post('/api/chat', async (req, res) => {
-  const { text, question } = req.body; // question is optional
+  const { text, question, lang = 'fr-FR' } = req.body; // question is optional
 
   console.log('--- Cleaning Request ---');
   console.log('Texte à nettoyer:', text);
@@ -78,7 +108,7 @@ app.post('/api/chat', async (req, res) => {
       messages: [
         {
           role: 'system',
-          content: `Tu es un assistant de correction linguistique de très haut niveau. Ton rôle est d'analyser une transcription audio qui peut contenir des erreurs, des hésitations ou des tics de langage.\n\nTa mission est la suivante :\n1.  **Corrige et nettoie** : Corrige les erreurs de transcription et nettoie la phrase des hésitations, répétitions et tics de langage pour la rendre claire et naturelle.\n2.  **Utilise le contexte (si fourni)** : Si une **question** est fournie, utilise-la comme indice principal pour déduire le sens réel de la réponse et effectuer des corrections plus précises.\n3.  **Sois fidèle** : Ne change pas le sens de la réponse de l'utilisateur. Ton but est de restituer son intention le plus fidèlement possible.\n4.  **Gère l'incertitude** : Si la transcription est trop ambiguë pour être corrigée avec certitude, retourne '[Pas de réponse détectée]'.\n5.  **Format de sortie** : Ne retourne QUE le texte corrigé, sans aucune phrase d'introduction comme "Voici le texte corrigé :".\n\nExemple avec question :\n-   **Question fournie** : "Quelle est la capitale du Royaume-Uni ?"\n-   **Transcription brute** : "euh... je crois que c'est... langue... non, lande... oui, lande"\n-   **Sortie attendue** : "Je crois que c'est Londres."\n\nExemple sans question :\n-   **Transcription brute** : "euh... j'aimerais... j'aimerais réserver une table pour... pour deux personnes ce soir."\n-   **Sortie attendue** : "J'aimerais réserver une table pour deux personnes ce soir."`,
+          content: getSystemPrompt(lang),
         },
         {
           role: 'user',
@@ -91,7 +121,17 @@ app.post('/api/chat', async (req, res) => {
     console.log('--- Cleaning Result ---');
     console.log('Texte nettoyé:', aiResponse);
     console.log('-----------------------');
-    res.json({ cleanedText: aiResponse });
+
+    // Save the transcription to the database
+    await transcriptService.create({
+      rawText: text,
+      cleanedText: aiResponse,
+      language: lang,
+      llmResponse: completion.choices[0],
+    });
+
+    // Send the cleaned text back to the client
+    res.json({ cleanedText: aiResponse, originalText: text, llmResponse: completion.choices[0] });
   } catch (error) {
     console.error('Error during chat completion:', error);
     res.status(500).json({ error: 'Failed to get chat response.' });
@@ -104,6 +144,7 @@ const wss = new WebSocketServer({ server });
 wss.on('connection', (ws) => {
   console.log('Client connected via WebSocket for transcription.');
   let audioChunks = [];
+  let transcriptionLanguage = 'fr'; // Default language
 
   ws.on('message', async (message) => {
     // All messages from the 'ws' library are Buffers. We must try to interpret them.
@@ -115,6 +156,13 @@ wss.on('connection', (ws) => {
         '[Backend] Message successfully parsed as JSON command:',
         command,
       );
+      if (command.event === 'start') {
+        transcriptionLanguage = command.lang === 'en-US' ? 'en' : 'fr';
+        console.log(
+          `[Backend] Transcription language set to: ${transcriptionLanguage}`,
+        );
+        return; // Don't process audio chunks for a start command
+      }
     } catch (e) {
       // If parsing fails, it's not a command, so it must be audio data.
       console.log(
@@ -146,9 +194,11 @@ wss.on('connection', (ws) => {
         const transcription = await openai.audio.transcriptions.create({
           model: 'whisper-1',
           file: audioFile,
-          language: 'fr',
+          language: transcriptionLanguage,
           prompt:
-            'Cette transcription est en français et concerne une conversation générale.',
+            transcriptionLanguage === 'fr'
+              ? 'Cette transcription est en français et concerne une conversation générale.'
+              : 'This transcription is in English and concerns a general conversation.',
         });
 
         console.log('--- Fallback Transcript (Raw) ---');
