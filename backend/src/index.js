@@ -1,11 +1,15 @@
-import 'dotenv/config';
-import express from 'express';
-import http from 'http';
-import cors from 'cors';
-
-import OpenAI from 'openai';
-import { toFile } from 'openai/uploads';
-import { WebSocketServer } from 'ws';
+const dotenv = require('dotenv');
+dotenv.config();
+const express = require('express');
+const http = require('http');
+const { WebSocketServer } = require('ws');
+const cors = require('cors');
+const multer = require('multer');
+const OpenAI = require('openai');
+const { toFile } = require('openai/uploads');
+const { Readable } = require('stream');
+const transcriptRoutes = require('./routes/transcript.routes');
+const transcriptService = require('./services/transcript.service');
 
 // --- OpenAI Client Setup ---
 const openai = new OpenAI({
@@ -18,8 +22,25 @@ const server = http.createServer(app);
 
 const PORT = process.env.PORT || 3001;
 
-app.use(cors());
+const corsOptions = {
+  origin: (origin, callback) => {
+    const allowedOrigins = ['http://localhost:3000', 'https://localhost:3000'];
+    // In a production environment, you should use a proper whitelist of allowed domains.
+    // For this development setup, we'll allow requests from our frontend's origin.
+    if (allowedOrigins.includes(origin) || !origin) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+  credentials: true, // This allows the server to accept cookies from the client.
+};
+
+app.use(cors(corsOptions));
 app.use(express.json());
+
+// --- Transcript History Routes ---
+app.use('/api/transcripts', transcriptRoutes);
 
 // --- Health Check Endpoint ---
 app.get('/', (req, res) => {
@@ -100,7 +121,17 @@ app.post('/api/chat', async (req, res) => {
     console.log('--- Cleaning Result ---');
     console.log('Texte nettoyé:', aiResponse);
     console.log('-----------------------');
-    res.json({ cleanedText: aiResponse });
+
+    // Save the transcription to the database
+    await transcriptService.create({
+      rawText: text,
+      cleanedText: aiResponse,
+      language: lang,
+      llmResponse: completion.choices[0],
+    });
+
+    // Send the cleaned text back to the client
+    res.json({ cleanedText: aiResponse, originalText: text, llmResponse: completion.choices[0] });
   } catch (error) {
     console.error('Error during chat completion:', error);
     res.status(500).json({ error: 'Failed to get chat response.' });

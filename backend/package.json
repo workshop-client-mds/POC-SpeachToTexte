@@ -3,13 +3,13 @@
   "version": "1.0.0",
   "description": "Backend for Speech-to-Text and Text-to-Speech POC",
   "main": "src/index.js",
-  "type": "module",
   "scripts": {
     "start": "node src/index.js",
     "start:prod": "node src/index.js",
     "dev": "nodemon src/index.js",
     "format": "prettier --write \"src/**/*.js\"",
-    "check-format": "prettier --check \"src/**/*.js\""
+    "check-format": "prettier --check \"src/**/*.js\"",
+    "migrate": "npx sequelize-cli db:migrate"
   },
   "dependencies": {
     "cors": "^2.8.5",
@@ -18,12 +18,15 @@
     "multer": "^2.0.1",
     "openai": "^4.52.2",
     "pg": "^8.12.0",
+    "pg-hstore": "^2.3.4",
     "sequelize": "^6.37.3",
-    "ws": "^8.18.3"
+    "ws": "^8.18.3",
+    "winston": "^3.11.0"
   },
   "devDependencies": {
     "nodemon": "^3.1.0",
-    "prettier": "^3.2.5"
+    "prettier": "^3.3.2",
+    "sequelize-cli": "^6.6.2"
   },
   "engines": {
     "node": ">=20.0.0"

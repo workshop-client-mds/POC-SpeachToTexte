@@ -1,0 +1,28 @@
+{
+  "development": {
+    "username": "postgres",
+    "password": "postgres",
+    "database": "poc_voice_db",
+    "host": "db",
+    "dialect": "postgres",
+    "schema": "app"
+  },
+  "test": {
+    "username": "postgres",
+    "password": "postgres",
+    "database": "poc_voice_db_test",
+    "host": "db",
+    "dialect": "postgres",
+    "schema": "app"
+  },
+  "production": {
+    "use_env_variable": "DATABASE_URL",
+    "dialect": "postgres",
+    "dialectOptions": {
+      "ssl": {
+        "require": true,
+        "rejectUnauthorized": false
+      }
+    }
+  }
+}

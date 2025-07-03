@@ -15,6 +15,8 @@ function App() {
   const [nativeApiFailed, setNativeApiFailed] = useState(false);
   const [language, setLanguage] = useState('fr-FR');
   const [isFallbackMode, setIsFallbackMode] = useState(false);
+  const [showHistory, setShowHistory] = useState(false);
+  const [history, setHistory] = useState([]);
 
   const recognition = useRef(null);
   const finalTranscriptRef = useRef('');
@@ -188,9 +190,49 @@ function App() {
     }
   };
 
+  const fetchHistory = async () => {
+    try {
+      const response = await fetch('http://localhost:3001/api/transcripts');
+      const data = await response.json();
+      setHistory(data);
+    } catch (error) {
+      console.error('Failed to fetch history:', error);
+    }
+  };
+
+  const toggleHistory = () => {
+    if (!showHistory) {
+      fetchHistory();
+    }
+    setShowHistory(!showHistory);
+  };
+
   return (
     <div className="text-white min-h-screen flex flex-col items-center justify-center font-sans p-4">
       <div className="w-full max-w-2xl space-y-8">
+        <div className="history-container absolute bottom-4 right-4">
+          {showHistory && (
+            <div className="history-panel bg-gray-800 rounded-lg p-4 shadow-lg w-96 max-h-96 overflow-y-auto mb-2">
+              <h2 className="text-xl font-bold mb-4">Transcription History</h2>
+              <div className="history-list space-y-4">
+                {history.length > 0 ? (
+                  history.map((item) => (
+                    <div key={item.id} className="history-item border-b border-gray-700 pb-2">
+                      <p className="text-sm text-gray-400">{new Date(item.createdAt).toLocaleString()} | {item.language}</p>
+                      <p><strong>Original:</strong> {item.rawText}</p>
+                      <p><strong>Cleaned:</strong> {item.cleanedText}</p>
+                    </div>
+                  ))
+                ) : (
+                  <p>No history found.</p>
+                )}
+              </div>
+            </div>
+          )}
+          <button onClick={toggleHistory} className="history-button bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-full shadow-lg">
+            {showHistory ? 'Close History' : 'View History'}
+          </button>
+        </div>
         <div className="bg-gray-800 rounded-lg p-6 shadow-lg">
           <div className="flex justify-between items-center mb-4">
             <h1 className="text-3xl font-bold">Speech-to-Text</h1>
