@@ -6,14 +6,16 @@ class RecorderService {
     this.mimeType = '';
   }
 
-  startRecording(onTranscript, onError) {
+  startRecording(onTranscript, onError, language = 'fr-FR') {
     // Use ws:// for local dev, wss:// for production
     const wsUrl = `ws://${window.location.hostname}:3001`;
     this.socket = new WebSocket(wsUrl);
 
     this.socket.onopen = async () => {
-      console.log('WebSocket connection established.');
       try {
+        // Send the language information as soon as the connection is open
+        this.socket.send(JSON.stringify({ event: 'start', lang: language }));
+
         const supportedMimeType = [
           'audio/webm;codecs=opus',
           'audio/webm',
