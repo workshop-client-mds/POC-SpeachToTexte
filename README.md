@@ -1,6 +1,6 @@
 # POC Voix - Speech-to-Text & Text-to-Speech
 
-Ce projet réalisé par PELLETIER Lucie, VICTOR Evan, MARCHESSE Gilles et MINI Anthony est un Proof of Concept (POC) pour une interaction vocale sur le web, incluant la transcription en temps réel (Speech-to-Text) et la synthèse vocale (Text-to-Speech) en utilisant les API d'OpenAI. L'utilisateur peut ainsi répondre aux questions à l'oral ou encore lire à haute voix la question qui lui est présentée. Bien que prenant juste en charge l'anglais et le français, il y a également une gestion du multilangue pour se calibrer correctement sur les réponses orales.
+Ce projet réalisé par PELLETIER Lucie, VICTOR Evan, MARCHESSES Gilles et MINI Anthony est un Proof of Concept (POC) pour une interaction vocale sur le web, incluant la transcription en temps réel (Speech-to-Text) et la synthèse vocale (Text-to-Speech) en utilisant les API d'OpenAI. L'utilisateur peut ainsi répondre aux questions à l'oral ou encore lire à haute voix la question qui lui est présentée. Bien que prenant juste en charge l'anglais et le français, il y a également une gestion du multilangue pour se calibrer correctement sur les réponses orales.
 ## Architecture
 
 - **Frontend**: Application React (Vite) avec Tailwind CSS.
