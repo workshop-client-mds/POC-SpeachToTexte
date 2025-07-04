@@ -22,7 +22,6 @@ function App() {
   const finalTranscriptRef = useRef('');
   const currentQuestionRef = useRef(null);
 
-
   // Setup SpeechRecognition on component mount if supported
   useEffect(() => {
     if (isSpeechRecognitionSupported) {
@@ -140,7 +139,9 @@ function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           text: rawText,
-          questionContext: currentQuestionRef.current ? currentQuestionRef.current.content : null,
+          questionContext: currentQuestionRef.current
+            ? currentQuestionRef.current.content
+            : null,
           lang: language,
         }),
       });
@@ -199,7 +200,9 @@ function App() {
   const fetchRandomQuestion = async () => {
     setStatus("Recherche d'une question...");
     try {
-      const response = await fetch('http://localhost:3001/api/questions/random');
+      const response = await fetch(
+        'http://localhost:3001/api/questions/random',
+      );
       if (!response.ok) {
         throw new Error('Failed to fetch question');
       }
@@ -231,105 +234,211 @@ function App() {
   };
 
   return (
-    <div className="text-white min-h-screen flex flex-col items-center justify-center font-sans p-4">
-      <div className="w-full max-w-2xl space-y-8">
-        <div className="history-container absolute bottom-4 right-4">
-          {showHistory && (
-            <div className="history-panel bg-gray-800 rounded-lg p-4 shadow-lg w-96 max-h-96 overflow-y-auto mb-2">
-              <h2 className="text-xl font-bold mb-4">Transcription History</h2>
+    <div className="bg-gray-50 min-h-screen font-sans text-gray-800">
+      {/* Header */}
+
+      {/* Main Content */}
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+          {/* Left Column */}
+          <div className="lg:col-span-2 space-y-8">
+            {/* Transcription Card */}
+            <div className="bg-white p-6 rounded-lg shadow-md">
+              <div className="flex justify-between items-center mb-4">
+                <h2 className="text-xl font-bold">Transcription en Direct</h2>
+                <select
+                  value={language}
+                  onChange={(e) => setLanguage(e.target.value)}
+                  className="bg-gray-100 border-gray-300 rounded-md p-2 text-sm focus:ring-blue-500 focus:border-blue-500"
+                >
+                  <option value="fr-FR">Français (France)</option>
+                  <option value="en-US">English (US)</option>
+                </select>
+              </div>
+              <div className="flex items-center gap-2 text-sm text-gray-500 mb-4">
+                <span>Statut:</span>
+                <span className="flex items-center gap-1.5 bg-green-100 text-green-800 px-2 py-0.5 rounded-full">
+                  <span className="h-2 w-2 bg-green-500 rounded-full"></span>
+                  {status}
+                </span>
+                {isFallbackMode && (
+                  <span className="text-yellow-600">(Mode Fallback)</span>
+                )}
+              </div>
+              <div className="min-h-[120px] bg-gray-100 rounded-md p-4 mb-6 border border-gray-200">
+                <p className="text-gray-700">
+                  {transcript ||
+                    'Cliquez sur "Démarrer l\'enregistrement" pour commencer...'}
+                </p>
+              </div>
+              <div className="flex justify-center">
+                <button
+                  onClick={handleToggleRecording}
+                  className={`flex items-center gap-2 px-6 py-3 rounded-lg text-lg font-semibold transition-all duration-300 shadow-sm ${isRecording ? 'bg-red-600 hover:bg-red-700 text-white' : 'bg-blue-600 hover:bg-blue-700 text-white'} focus:outline-none focus:ring-4 ring-opacity-50 ${isRecording ? 'ring-red-300' : 'ring-blue-300'}`}
+                >
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    className="h-6 w-6"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"
+                    />
+                  </svg>
+                  {isRecording ? 'Arrêter' : "Démarrer l'enregistrement"}
+                </button>
+              </div>
+            </div>
+
+            {/* Synthèse Vocale Card */}
+            <div className="bg-white p-6 rounded-lg shadow-md">
+              <h2 className="text-xl font-bold mb-4">Synthèse Vocale</h2>
+              <textarea
+                className="w-full bg-gray-100 p-3 rounded-md mb-4 border border-gray-200 focus:ring-2 focus:ring-green-500 focus:outline-none"
+                rows="3"
+                placeholder="Saisissez votre texte ici..."
+                value={ttsText}
+                onChange={(e) => setTtsText(e.target.value)}
+              ></textarea>
+              <div className="flex justify-end">
+                <button
+                  onClick={handleTtsRequest}
+                  className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg transition-colors"
+                >
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    className="h-5 w-5"
+                    viewBox="0 0 20 20"
+                    fill="currentColor"
+                  >
+                    <path
+                      fillRule="evenodd"
+                      d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z"
+                      clipRule="evenodd"
+                    />
+                  </svg>
+                  Écouter
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* Right Column */}
+          <div className="lg:col-span-1 space-y-8">
+            {/* Contexte IA Card */}
+            <div className="bg-white p-6 rounded-lg shadow-md">
+              <h2 className="text-xl font-bold mb-2">Contexte IA</h2>
+              <div className="bg-blue-50 border border-blue-200 text-blue-800 rounded-lg p-4 text-center mb-4">
+                {currentQuestion ? (
+                  <div>
+                    <p className="text-sm font-medium text-blue-600 mb-1">
+                      {currentQuestion.category}
+                    </p>
+                    <p className="font-semibold">
+                      {currentQuestion.content.questionText}
+                    </p>
+                  </div>
+                ) : (
+                  <p className="text-sm">
+                    Générez une question pour tester votre compréhension orale.
+                  </p>
+                )}
+              </div>
+              <button
+                onClick={fetchRandomQuestion}
+                className="w-full flex items-center justify-center gap-2 bg-white border border-gray-300 hover:bg-gray-100 text-gray-800 font-bold py-2 px-4 rounded-lg transition-colors"
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  className="h-5 w-5"
+                  viewBox="0 0 20 20"
+                  fill="currentColor"
+                >
+                  <path
+                    fillRule="evenodd"
+                    d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 110 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z"
+                    clipRule="evenodd"
+                  />
+                </svg>
+                Nouvelle Question
+              </button>
+            </div>
+
+            {/* Historique Card */}
+            <div className="bg-white p-6 rounded-lg shadow-md">
+              <h2 className="text-xl font-bold mb-4">Historique</h2>
+              <div className="text-center text-gray-500 space-y-2">
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  className="h-12 w-12 mx-auto text-gray-300"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={1}
+                    d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
+                  />
+                </svg>
+                <p className="text-sm">Aucun enregistrement récent.</p>
+              </div>
+              <button
+                onClick={toggleHistory}
+                className="mt-4 w-full flex items-center justify-center gap-2 bg-white border border-gray-300 hover:bg-gray-100 text-gray-800 font-bold py-2 px-4 rounded-lg transition-colors"
+              >
+                Voir tout l'historique
+              </button>
+            </div>
+          </div>
+        </div>
+        {showHistory && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex justify-center items-center z-50">
+            <div className="history-panel bg-white rounded-lg p-6 shadow-xl w-full max-w-2xl max-h-[80vh] overflow-y-auto">
+              <div className="flex justify-between items-center mb-4">
+                <h2 className="text-2xl font-bold">
+                  Historique des Transcriptions
+                </h2>
+                <button
+                  onClick={toggleHistory}
+                  className="text-gray-500 hover:text-gray-800"
+                >
+                  &times;
+                </button>
+              </div>
               <div className="history-list space-y-4">
                 {history.length > 0 ? (
                   history.map((item) => (
-                    <div key={item.id} className="history-item border-b border-gray-700 pb-2">
-                      <p className="text-sm text-gray-400">{new Date(item.createdAt).toLocaleString()} | {item.language}</p>
-                      <p><strong>Original:</strong> {item.rawText}</p>
-                      <p><strong>Cleaned:</strong> {item.cleanedText}</p>
+                    <div
+                      key={item.id}
+                      className="history-item border-b border-gray-200 pb-3"
+                    >
+                      <p className="text-sm text-gray-500">
+                        {new Date(item.createdAt).toLocaleString()} |{' '}
+                        {item.language}
+                      </p>
+                      <p>
+                        <strong>Original:</strong> {item.rawText}
+                      </p>
+                      <p>
+                        <strong>Corrigé:</strong> {item.cleanedText}
+                      </p>
                     </div>
                   ))
                 ) : (
-                  <p>No history found.</p>
+                  <p>Aucun historique trouvé.</p>
                 )}
               </div>
             </div>
-          )}
-          <button onClick={toggleHistory} className="history-button bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-full shadow-lg">
-            {showHistory ? 'Close History' : 'View History'}
-          </button>
-        </div>
-        <div className="bg-gray-800 rounded-lg p-6 shadow-lg">
-          <div className="flex justify-between items-center mb-4">
-            <h1 className="text-3xl font-bold">Speech-to-Text</h1>
-            <select
-              value={language}
-              onChange={(e) => setLanguage(e.target.value)}
-              className="bg-gray-700 border border-gray-600 rounded-md p-2 focus:ring-2 focus:ring-blue-500 focus:outline-none"
-            >
-              <option value="fr-FR">Français</option>
-              <option value="en-US">English</option>
-            </select>
           </div>
-          <p className="text-center text-gray-400 mb-4">
-            Statut: {status}{' '}
-            {isFallbackMode && (
-              <span className="text-yellow-400 text-xs">(Mode Fallback)</span>
-            )}
-          </p>
-          <div className="min-h-[120px] bg-gray-900 rounded-md p-4 mb-6 border border-gray-700">
-            <p className="text-gray-300">
-              {transcript ||
-                'Cliquez sur "Parler" pour commencer la transcription.'}
-            </p>
-          </div>
-          <div className="flex justify-center">
-            <button
-              onClick={handleToggleRecording}
-              className={`px-8 py-4 rounded-full text-lg font-semibold transition-all duration-300 ${isRecording ? 'bg-red-600 hover:bg-red-700 animate-pulse' : 'bg-blue-600 hover:bg-blue-700'} focus:outline-none focus:ring-4 ring-opacity-50 ${isRecording ? 'ring-red-400' : 'ring-blue-400'} disabled:bg-gray-500 disabled:cursor-not-allowed`}
-            >
-              {isRecording ? 'Stop' : 'Parler'}
-            </button>
-          </div>
-        </div>
-
-        <div className="bg-gray-800 rounded-lg p-6 shadow-lg">
-          <div className="mb-6">
-            <h3 className="text-lg font-medium text-gray-300 mb-2">Question de Contexte</h3>
-            <div className="bg-gray-900 rounded-md p-4 mb-4 border border-gray-700 min-h-[100px] flex flex-col justify-center">
-              {currentQuestion ? (
-                <div>
-                  <p className="text-sm text-gray-400 mb-1">{currentQuestion.category}</p>
-                  <p className="text-lg">{currentQuestion.content.questionText}</p>
-                </div>
-              ) : (
-                <p className="text-gray-500">Cliquez sur le bouton pour obtenir une question.</p>
-              )}
-            </div>
-            <button
-              onClick={fetchRandomQuestion}
-              className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded-lg transition-colors"
-            >
-              Proposer une question
-            </button>
-          </div>
-
-          <h2 className="text-2xl font-bold mb-4">Actions</h2>
-          <textarea
-            className="w-full bg-gray-700 text-white p-3 rounded-md mb-4 border border-gray-600 focus:ring-2 focus:ring-green-500 focus:outline-none"
-            rows="3"
-            placeholder="Entrez du texte à synthétiser..."
-            value={ttsText}
-            onChange={(e) => setTtsText(e.target.value)}
-          ></textarea>
-          <div className="flex justify-center">
-            <button
-              onClick={handleTtsRequest}
-              className="bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-6 rounded-lg transition-colors disabled:bg-gray-500"
-              disabled={status !== 'Prêt'}
-            >
-              Lire le texte
-            </button>
-          </div>
-        </div>
-      </div>
+        )}
+      </main>
     </div>
   );
 }
