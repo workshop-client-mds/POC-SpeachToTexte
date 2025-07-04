@@ -27,6 +27,7 @@ class RecorderService {
           throw new Error('Navigateur non supporté: aucun format audio trouvé.');
         }
         this.mimeType = supportedMimeType;
+        console.log(`[Frontend] Using supported MIME type: ${this.mimeType}`);
 
         this.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
         this.mediaRecorder = new MediaRecorder(this.stream, { mimeType: this.mimeType });

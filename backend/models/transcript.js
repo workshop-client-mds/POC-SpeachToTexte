@@ -22,6 +22,7 @@ module.exports = (sequelize, DataTypes) => {
   }, {
     sequelize,
     modelName: 'Transcript',
+    schema: 'app'
   });
   return Transcript;
 };

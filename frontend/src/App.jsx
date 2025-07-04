@@ -10,7 +10,7 @@ function App() {
   const [isRecording, setIsRecording] = useState(false);
   const [transcript, setTranscript] = useState('');
   const [ttsText, setTtsText] = useState('');
-  const [contextQuestion, setContextQuestion] = useState('');
+  const [currentQuestion, setCurrentQuestion] = useState(null);
   const [status, setStatus] = useState('Prêt');
   const [nativeApiFailed, setNativeApiFailed] = useState(false);
   const [language, setLanguage] = useState('fr-FR');
@@ -20,7 +20,8 @@ function App() {
 
   const recognition = useRef(null);
   const finalTranscriptRef = useRef('');
-  const contextQuestionRef = useRef('');
+  const currentQuestionRef = useRef(null);
+
 
   // Setup SpeechRecognition on component mount if supported
   useEffect(() => {
@@ -40,6 +41,11 @@ function App() {
       setupNativeRecognition();
     }
   }, [language]); // Re-run when language changes
+
+  // Keep a ref in sync with the latest question state to avoid stale closures
+  useEffect(() => {
+    currentQuestionRef.current = currentQuestion;
+  }, [currentQuestion]);
 
   const setupNativeRecognition = () => {
     recognition.current = new SpeechRecognition();
@@ -134,7 +140,7 @@ function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           text: rawText,
-          question: contextQuestionRef.current,
+          questionContext: currentQuestionRef.current ? currentQuestionRef.current.content : null,
           lang: language,
         }),
       });
@@ -187,6 +193,23 @@ function App() {
     } catch (error) {
       console.error('TTS request error:', error);
       setStatus('Erreur de synthèse vocale.');
+    }
+  };
+
+  const fetchRandomQuestion = async () => {
+    setStatus("Recherche d'une question...");
+    try {
+      const response = await fetch('http://localhost:3001/api/questions/random');
+      if (!response.ok) {
+        throw new Error('Failed to fetch question');
+      }
+      const data = await response.json();
+      setCurrentQuestion(data);
+      setStatus('Prêt');
+    } catch (error) {
+      console.error('Failed to fetch random question:', error);
+      setStatus('Erreur lors de la récupération de la question.');
+      setCurrentQuestion(null);
     }
   };
 
@@ -269,23 +292,23 @@ function App() {
 
         <div className="bg-gray-800 rounded-lg p-6 shadow-lg">
           <div className="mb-6">
-            <label
-              htmlFor="question"
-              className="block text-lg font-medium text-gray-300 mb-2"
+            <h3 className="text-lg font-medium text-gray-300 mb-2">Question de Contexte</h3>
+            <div className="bg-gray-900 rounded-md p-4 mb-4 border border-gray-700 min-h-[100px] flex flex-col justify-center">
+              {currentQuestion ? (
+                <div>
+                  <p className="text-sm text-gray-400 mb-1">{currentQuestion.category}</p>
+                  <p className="text-lg">{currentQuestion.content.questionText}</p>
+                </div>
+              ) : (
+                <p className="text-gray-500">Cliquez sur le bouton pour obtenir une question.</p>
+              )}
+            </div>
+            <button
+              onClick={fetchRandomQuestion}
+              className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded-lg transition-colors"
             >
-              Question de Contexte
-            </label>
-            <input
-              type="text"
-              id="question"
-              value={contextQuestion}
-              onChange={(e) => {
-                setContextQuestion(e.target.value);
-                contextQuestionRef.current = e.target.value;
-              }}
-              className="w-full p-2 bg-gray-700 border border-gray-600 rounded-md focus:ring-2 focus:ring-blue-500 focus:outline-none"
-              placeholder="Entrez la question posée à l'utilisateur..."
-            />
+              Proposer une question
+            </button>
           </div>
 
           <h2 className="text-2xl font-bold mb-4">Actions</h2>

@@ -1,6 +1,9 @@
 # Use the official Node.js 20 image.
 FROM node:20-slim
 
+# Install curl for debugging purposes
+RUN apt-get update && apt-get install -y curl
+
 # Create and change to the app directory.
 WORKDIR /usr/src/app
 

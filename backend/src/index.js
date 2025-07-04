@@ -9,6 +9,7 @@ const OpenAI = require('openai');
 const { toFile } = require('openai/uploads');
 const { Readable } = require('stream');
 const transcriptRoutes = require('./routes/transcript.routes');
+const questionRoutes = require('./routes/question.routes');
 const transcriptService = require('./services/transcript.service');
 
 // --- OpenAI Client Setup ---
@@ -41,6 +42,7 @@ app.use(express.json());
 
 // --- Transcript History Routes ---
 app.use('/api/transcripts', transcriptRoutes);
+app.use('/api/questions', questionRoutes);
 
 // --- Health Check Endpoint ---
 app.get('/', (req, res) => {
@@ -83,58 +85,77 @@ const getSystemPrompt = (lang) => {
 };
 
 app.post('/api/chat', async (req, res) => {
-  const { text, question, lang = 'fr-FR' } = req.body; // question is optional
+  const { text: rawText, questionContext, lang } = req.body;
 
-  console.log('--- Cleaning Request ---');
-  console.log('Texte à nettoyer:', text);
-  if (question) {
-    console.log('Question de contexte:', question);
+  if (!rawText) {
+    return res.status(400).json({ message: 'Text to clean is required.' });
   }
-  console.log('------------------------');
 
-  if (!text) {
-    return res.status(400).json({ error: 'Text is required' });
-  }
+  let completion;
+  let evaluationResult;
 
   try {
-    // Construct the user message based on whether a question is provided
-    const userContent = question
-      ? `Question: "${question}"\n\nTranscription brute de la réponse: "${text}"`
-      : `Transcription brute: "${text}"`;
+    let systemPrompt;
+    let userPrompt;
 
-    const completion = await openai.chat.completions.create({
-      model: 'gpt-4.1-nano', // Using a newer, more capable model
-      temperature: 0.2, // Lower temperature for more deterministic corrections
+    if (questionContext && questionContext.questionText) {
+      // New logic for evaluating an answer
+      systemPrompt = `You are an intelligent quiz evaluator. Your task is to evaluate a user's spoken answer to a question.
+
+You will be given the question, the expected answer, and the user's raw transcript.
+
+Your goal is to:
+1. Determine if the user's answer is correct, partially correct, or incorrect.
+2. Provide a concise, one-sentence feedback to the user in ${lang}.
+
+- If correct, start with "Correct !". Example: "Correct ! La capitale est bien Canberra."
+- If partially correct, start with "Presque !".
+- If incorrect, start with "Incorrect.". Example: "Incorrect. La bonne réponse est Canberra."
+- If the answer is unrelated or nonsensical (e.g., "je ne sais pas", "bla bla"), respond with: "[Réponse non pertinente ou inaudible]"
+
+Be encouraging and brief.`;
+
+      userPrompt = `Question: "${questionContext.questionText}"\nExpected Answer: "${questionContext.expectedAnswer}"\nUser's Spoken Answer: "${rawText}"`;
+    } else {
+      // Fallback to old cleaning logic if no question context is provided
+      systemPrompt = `You are an expert linguist. Your task is to correct and rephrase the following text. The language is ${lang}. If the text is empty or nonsensical, return "[Pas de réponse détectée]".`;
+      userPrompt = rawText;
+    }
+
+    console.log('--- Evaluation Request ---');
+    console.log('System Prompt:', systemPrompt);
+    console.log('User Prompt:', userPrompt);
+    console.log('------------------------');
+
+    completion = await openai.chat.completions.create({
+      model: 'gpt-4o',
       messages: [
-        {
-          role: 'system',
-          content: getSystemPrompt(lang),
-        },
-        {
-          role: 'user',
-          content: userContent,
-        },
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userPrompt },
       ],
+      temperature: 0.2, // Lower temperature for more deterministic evaluation
+      max_tokens: 100,
     });
 
-    const aiResponse = completion.choices[0].message.content;
-    console.log('--- Cleaning Result ---');
-    console.log('Texte nettoyé:', aiResponse);
+    evaluationResult = completion.choices[0].message.content.trim();
+
+    console.log('--- Evaluation Result ---');
+    console.log('IA Feedback:', evaluationResult);
     console.log('-----------------------');
 
-    // Save the transcription to the database
+    // Save the transcript to the database
     await transcriptService.create({
-      rawText: text,
-      cleanedText: aiResponse,
+      rawText,
+      cleanedText: evaluationResult, // We now save the feedback as the 'cleanedText'
+      contextQuestion: questionContext ? questionContext.questionText : null,
       language: lang,
       llmResponse: completion.choices[0],
     });
 
-    // Send the cleaned text back to the client
-    res.json({ cleanedText: aiResponse, originalText: text, llmResponse: completion.choices[0] });
+    res.json({ cleanedText: evaluationResult });
   } catch (error) {
     console.error('Error during chat completion:', error);
-    res.status(500).json({ error: 'Failed to get chat response.' });
+    res.status(500).json({ message: 'Failed to evaluate text' });
   }
 });
 
@@ -174,6 +195,7 @@ wss.on('connection', (ws) => {
 
     // If we're here, the message was a valid JSON command.
     if (command && command.event === 'end') {
+      console.log('[Backend] Received "end" command:', command);
       if (audioChunks.length === 0) {
         console.log(
           '[Backend] Received "end" command but no audio was recorded.',
@@ -182,6 +204,7 @@ wss.on('connection', (ws) => {
       }
 
       console.log('End of audio stream received. Processing...');
+      console.log('Received MIME type:', command.mimeType);
       try {
         const audioBuffer = Buffer.concat(audioChunks);
         const mimeType = command.mimeType || 'audio/webm';
