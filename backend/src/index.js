@@ -167,16 +167,32 @@ app.post('/api/chat', async (req, res) => {
     console.log('IA Feedback:', evaluationResult);
     console.log('-----------------------');
 
+    const aiResponseString = completion.choices[0].message.content;
+    let cleanedText;
+
+    try {
+      // The AI should return a minified JSON string. We parse it here.
+      const aiResponseJson = JSON.parse(aiResponseString);
+      cleanedText = aiResponseJson.feedback || "[L'évaluation de l'IA n'a pas pu être lue]";
+    } catch (error) {
+      console.error('Error parsing AI response JSON:', {
+        error: error.message,
+        response: aiResponseString,
+      });
+      // Fallback if the AI response is not valid JSON
+      cleanedText = "[Erreur d'évaluation, format de réponse inattendu]";
+    }
+
     // Save the transcript to the database
     await transcriptService.create({
       rawText,
-      cleanedText: evaluationResult, // We now save the feedback as the 'cleanedText'
+      cleanedText, // Use the extracted feedback text
       contextQuestion: questionContext ? questionContext.questionText : null,
       language: lang,
       llmResponse: completion.choices[0],
     });
 
-    res.json({ cleanedText: evaluationResult });
+    res.json({ cleanedText });
   } catch (error) {
     console.error('Error during chat completion:', error);
     res.status(500).json({ message: 'Failed to evaluate text' });
